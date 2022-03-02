@@ -4,6 +4,8 @@
 
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 #define SOCK_MRP 99
 #define MESG_SIZE 100
@@ -15,16 +17,17 @@ typedef struct
   char message[MESG_SIZE];
   float time_sent;
   int dest_port;
+  struct in_addr dest_addr;
 }msg_sent_info;
 typedef struct
 {
   char message[MESG_SIZE];
 }msg_recv;
-typedef struct
-{
-  msg_sent_info* unack_table;
-  msg_recv* ack_table;
-}msg_info;
+// typedef struct
+// {
+//   msg_sent_info* unack_table;
+//   msg_recv* ack_table;
+// }msg_info;
 
 int r_socket(int, int, int);
 int r_bind(int, const struct sockaddr*, socklen_t);
