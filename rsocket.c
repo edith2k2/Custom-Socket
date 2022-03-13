@@ -11,7 +11,7 @@
 #include <pthread.h>
 // #include <signal.h>
 #include <errno.h>
-#include <time.h>
+// #include <time.h>
 
 #include "rsocket.h"
 
@@ -20,7 +20,7 @@ void* s_thread_runner(void*);
 pthread_mutex_t mutex1;
 int udp_sockfd;
 msg_sent_info* unack_table;
-msg_recv* ack_table;
+msg_recv* recv_table;
 int message_seq = 0;
 
 int r_socket(int domain, int type, int protocol)
@@ -33,7 +33,7 @@ int r_socket(int domain, int type, int protocol)
   udp_sockfd = socket(domain, SOCK_DGRAM, protocol);
   if (udp_sockfd < 0) return udp_sockfd;
   unack_table = (msg_sent_info*)malloc(TABLE_SIZE * sizeof(msg_sent_info));
-  ack_table = (msg_recv*)malloc(TABLE_SIZE * sizeof(msg_recv));
+  recv_table = (msg_recv*)malloc(TABLE_SIZE * sizeof(msg_recv));
   // initialisation of tables
   for (int i = 0; i < TABLE_SIZE; i++)
   {
@@ -43,11 +43,12 @@ int r_socket(int domain, int type, int protocol)
   }
   for (int i = 0; i < TABLE_SIZE; i++)
   {
-    memset(ack_table[i].message, '\0', TABLE_SIZE);
+    memset(recv_table[i].message, '\0', TABLE_SIZE);
+    recv_table[i].time = -1;
   }
   // preparing argument
   // msg_info arg;
-  // arg.ack_table = ack_table;
+  // arg.recv_table = recv_table;
   // arg.unack_table = unack_table;
   // creating threads
   pthread_mutex_init(&mutex1, NULL);
@@ -81,7 +82,8 @@ ssize_t r_sendto(int sockfd, const void *buf, size_t len, int flags, const struc
       unack_table[i].dest_addr = ((struct sockaddr_in*)dest_addr) -> sin_addr;
       unack_table[i].dest_port = ((struct sockaddr_in*)dest_addr) -> sin_port;
       strcpy(unack_table[i].message, buffer);
-      unack_table[i].time_sent = ;
+      unack_table[i].time_sent = time(NULL);
+      break;
     }
   }
   int send_ret = sendto(sockfd, buffer, strlen(buffer) + 1, 0, dest_addr, addrlen);
@@ -91,11 +93,32 @@ ssize_t r_sendto(int sockfd, const void *buf, size_t len, int flags, const struc
 ssize_t r_recvfrom(int sockfd, void *buf, size_t len, int flags, struct sockaddr *src_addr, socklen_t *addrlen)
 {
   // check received-message table and block if no message
-  return -1;
+  time_t min_time = -1;
+  int min_time_index = 0;
+  while (min_time == -1)
+  {
+    for (int i = 0; i < TABLE_SIZE; i++)
+    {
+      if (recv_table[i].time != -1)
+      {
+        if (min_time == -1 || min_time > recv_table[i].time)
+        {
+          min_time = recv_table[i].time;
+          min_time_index = i;
+        }
+      }
+    }
+    sleep(SLEEP_TIME);
+  }
+  strcpy(buf, recv_table[min_time_index].message);
+  size_t size = sizeof(recv_table[min_time_index].message);
+  recv_table[min_time_index].time = -1;
+  memset(recv_table[min_time_index].message, '\0', TABLE_SIZE);
+  return size;
 }
-int close(int fd)
+int r_close(int fd)
 {
-  return -1;
+  return close(fd);
 }
 int dropMessage(float p)
 {
@@ -112,7 +135,7 @@ void* r_thread_runner(void* param)
   struct sockaddr_in cli_addr;
   socklen_t cli_len = sizeof(cli_addr);
   recv_bytes = recvfrom(udp_sockfd, buffer, MESG_SIZE, 0, (struct sockaddr*)&cli_addr, &cli_len);
-  // if (recv_bytes < 0) return recv_bytes;
+  if (recv_bytes < 0) return recv_bytes;
   // check message
   // acknowledgment is sent in form ACK[message_seq]
   if (strlen(buffer) != 0 && buffer[0] == 'A')
@@ -120,7 +143,7 @@ void* r_thread_runner(void* param)
     // message is ACK
   }else
   {
-    
+    // message is data
   }
   pthread_mutex_unlock(&mutex1);
 }
@@ -134,7 +157,7 @@ void* s_thread_runner(void* param)
     // see if timeout period is over
     for (int i = 0; i < TABLE_SIZE; i++)
     {
-      if (unack_table[i].dest_port != -1 && unack_table[i].time_sent -  > 2 * T)
+      if (unack_table[i].dest_port != -1 && time(NULL) - unack_table[i].time_sent > 2 * T)
       {
         // see if timeout period is over and resend and reset
         struct sockaddr_in cli_addr;
@@ -143,9 +166,41 @@ void* s_thread_runner(void* param)
         cli_addr.sin_port = unack_table[i].dest_port;
         int cli_len = sizeof(cli_addr);
         sendto(udp_sockfd, unack_table[i].message, strlen(unack_table[i].message) + 1, 0, (struct sockaddr*)&cli_addr, cli_len);
-        unack_table[i].time_sent = ;
+        unack_table[i].time_sent = time(NULL);
       }
     }
     pthread_mutex_unlock(&mutex1);
   }
 }
+void itoa(int value, char* result) {
+    char* ptr = result, *ptr1 = result, tmp_char;
+    int tmp_value;
+    char int_map[] = "0123456789";
+    do
+    {
+      tmp_value = value;
+      value /= 10;
+      *ptr = int_map[(tmp_value - value * 10)];
+      ptr++;
+    } while ( value );
+
+    // Apply negative sign
+    if (tmp_value < 0) *ptr++ = '-';
+    *ptr-- = '\0';
+    while(ptr1 < ptr)
+    {
+      tmp_char = *ptr;
+      *ptr--= *ptr1;
+      *ptr1++ = tmp_char;
+    }
+}
+// int atoi(char* buffer, int len)
+// {
+//   int ret = 0;
+//   for (int i = 0; i < len; i++)
+//   {
+//     printf("%d\n", buffer[i]);
+//     ret = 10 * ret + buffer[i];
+//   }
+//   return ret;
+// }
